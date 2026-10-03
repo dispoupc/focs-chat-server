@@ -5,7 +5,7 @@ from typing import Dict, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="FOCS Community Platform")
+app = FastAPI(title="FOCS Community Final")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -99,14 +99,12 @@ def bot_reply(text: str):
         return "¡Hola! Soy FOCS Bot. ¿Listo para Fight of Characters?"
     if "ayuda" in q:
         return "Prueba: /bot comunidad, /bot medallas, /bot ranking, /bot partidas."
-    if "comunidad" in q:
-        return "FOCS Community conecta chat, amigos, salas, perfiles y eventos."
     if "medalla" in q:
-        return "Las medallas podrán enlazarse con la data del mapa FOCS."
+        return "Sistema sugerido: +15 por victoria, cada 100 puntos una nueva medalla."
     if "ranking" in q:
-        return "El ranking podrá integrarse con resultados y estadísticas del mapa."
+        return "El ranking visual del cliente es demostrativo; luego se puede enlazar al mapa FOCS."
     if "partida" in q:
-        return "Las funciones de partidas pueden añadirse después del chat y perfiles."
+        return "La pestaña Play WC3 sirve como base visual para futuras colas y salas."
     return f"FOCS Bot recibió: «{text.strip()}»"
 
 
@@ -128,135 +126,119 @@ async def unregister(ws: WebSocket, notify=True):
         await broadcast_global_presence()
 
 
-@app.get("/")
+@app.get('/')
 async def root():
     return {
-        "ok": True,
-        "name": "FOCS Community",
-        "version": "2.0",
-        "features": ["rooms", "private_messages", "buzz", "presence", "thoughts"],
+        'ok': True,
+        'name': 'FOCS Community Final',
+        'version': '3.0',
+        'features': ['rooms', 'private_messages', 'buzz', 'presence', 'thoughts', 'wc3_queue_ui'],
     }
 
 
-@app.get("/health")
+@app.get('/health')
 async def health():
-    return {"ok": True}
+    return {'ok': True}
 
 
-@app.websocket("/ws/{room}/{username}")
+@app.websocket('/ws/{room}/{username}')
 async def ws_chat(websocket: WebSocket, room: str, username: str):
     room = norm_room(room)
     username = norm_name(username)
     await websocket.accept()
 
     if username.lower() in by_name:
-        await websocket.send_json({
-            "type": "error",
-            "text": f'El nombre "{username}" ya está en uso.',
-            "timestamp": now_iso(),
-        })
+        await websocket.send_json({'type': 'error', 'text': f'El nombre "{username}" ya está en uso.', 'timestamp': now_iso()})
         await websocket.close()
         return
 
     rooms[room].add(websocket)
-    meta[websocket] = {
-        "room": room,
-        "username": username,
-        "status": "online",
-        "thought": "Ready to fight",
-    }
+    meta[websocket] = {'room': room, 'username': username, 'status': 'online', 'thought': 'Ready to fight'}
     by_name[username.lower()] = websocket
 
-    await system(room, f"{username} entró a la sala.")
+    await system(room, f'{username} entró a la sala.')
     await broadcast_room_presence(room)
     await broadcast_global_presence()
 
     try:
         while True:
             data = await websocket.receive_json()
-            action = str(data.get("action", "chat")).strip().lower()
+            action = str(data.get('action', 'chat')).strip().lower()
             m = meta[websocket]
 
-            if action == "presence":
-                status = str(data.get("status", "online")).strip().lower()
-                if status not in {"online", "away", "busy", "afk"}:
-                    status = "online"
-                m["status"] = status
-                thought = str(data.get("thought", m.get("thought", "Ready to fight"))).strip()[:80]
-                m["thought"] = thought or "Ready to fight"
-                await broadcast_room_presence(m["room"])
+            if action == 'presence':
+                status = str(data.get('status', 'online')).strip().lower()
+                if status not in {'online', 'away', 'busy', 'afk'}:
+                    status = 'online'
+                m['status'] = status
+                thought = str(data.get('thought', m.get('thought', 'Ready to fight'))).strip()[:80]
+                m['thought'] = thought or 'Ready to fight'
+                await broadcast_room_presence(m['room'])
                 await broadcast_global_presence()
                 continue
 
-            if action == "profile":
-                thought = str(data.get("thought", m.get("thought", "Ready to fight"))).strip()[:80]
-                m["thought"] = thought or "Ready to fight"
-                await broadcast_room_presence(m["room"])
-                await broadcast_global_presence()
-                continue
+            channel = str(data.get('channel', 'room')).strip().lower()
+            target = norm_name(str(data.get('target', ''))) if data.get('target') else ''
 
-            channel = str(data.get("channel", "room")).strip().lower()
-            target = norm_name(str(data.get("target", ""))) if data.get("target") else ""
-
-            if action == "buzz":
+            if action == 'buzz':
                 payload = {
-                    "type": "buzz",
-                    "channel": channel,
-                    "sender": m["username"],
-                    "target": target,
-                    "room": m["room"],
-                    "text": "¡Zumbido!",
-                    "timestamp": now_iso(),
+                    'type': 'buzz',
+                    'channel': channel,
+                    'sender': m['username'],
+                    'target': target,
+                    'room': m['room'],
+                    'text': '¡Zumbido!',
+                    'timestamp': now_iso(),
                 }
-                if channel == "private":
+                if channel == 'private':
                     dest = by_name.get(target.lower())
                     if not dest:
-                        await safe_send(websocket, {"type": "error", "text": f'{target} no está conectado.'})
+                        await safe_send(websocket, {'type': 'error', 'text': f'{target} no está conectado.'})
                         continue
                     await safe_send(websocket, payload)
                     if dest is not websocket:
                         await safe_send(dest, payload)
                 else:
-                    await room_send(m["room"], payload)
+                    await room_send(m['room'], payload)
                 continue
 
-            text = str(data.get("text", "")).strip()[:2000]
+            text = str(data.get('text', '')).strip()[:2000]
             if not text:
                 continue
 
-            if channel == "private":
+            if channel == 'private':
                 dest = by_name.get(target.lower())
                 if not dest:
-                    await safe_send(websocket, {"type": "error", "text": f'{target} no está conectado.'})
+                    await safe_send(websocket, {'type': 'error', 'text': f'{target} no está conectado.'})
                     continue
                 payload = {
-                    "type": "private",
-                    "channel": "private",
-                    "sender": m["username"],
-                    "target": target,
-                    "text": text,
-                    "timestamp": now_iso(),
+                    'type': 'private',
+                    'channel': 'private',
+                    'sender': m['username'],
+                    'target': target,
+                    'text': text,
+                    'timestamp': now_iso(),
                 }
                 await safe_send(websocket, payload)
                 if dest is not websocket:
                     await safe_send(dest, payload)
             else:
                 payload = {
-                    "type": "message",
-                    "channel": "room",
-                    "sender": m["username"],
-                    "room": m["room"],
-                    "text": text,
-                    "timestamp": now_iso(),
+                    'type': 'message',
+                    'channel': 'room',
+                    'sender': m['username'],
+                    'room': m['room'],
+                    'text': text,
+                    'timestamp': now_iso(),
                 }
-                await room_send(m["room"], payload)
-                if text.lower().startswith("/bot"):
-                    await room_send(m["room"], {
-                        "type": "bot",
-                        "sender": "FOCS Bot",
-                        "room": m["room"],
-                        "text": bot_reply(text[4:].strip()),
-                        "timestamp": now_iso(),
+                await room_send(m['room'], payload)
+                if text.lower().startswith('/bot'):
+                    await room_send(m['room'], {
+                        'type': 'bot',
+                        'sender': 'FOCS Bot',
+                        'room': m['room'],
+                        'text': bot_reply(text[4:].strip()),
+                        'timestamp': now_iso(),
                     })
     except WebSocketDisconnect:
         pass
